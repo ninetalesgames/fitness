@@ -47,6 +47,13 @@ type DailyWorkoutSnapshot = {
   exercises: ExerciseDef[];
 };
 
+type BonusWorkout = {
+  id: string;
+  title: string;
+  description: string;
+  xp: number;
+};
+
 type AppState = {
   xp: number;
   level: number;
@@ -55,10 +62,12 @@ type AppState = {
   lastCompletedDate: string | null;
   upperRotation: "A" | "B";
   completedExerciseIdsByDate: Record<string, string[]>;
+  completedBonusIdsByDate: Record<string, string[]>;
   dailyWorkoutSnapshotByDate: Record<string, DailyWorkoutSnapshot>;
 };
 
 const XP_PER_LEVEL = 100;
+const BONUS_XP_CAP_PER_DAY = 12;
 
 const MASCOT_FILES = ["icon.png", "wave.png", "nerd.png", "cool.png"];
 
@@ -119,6 +128,7 @@ const defaultState: AppState = {
   lastCompletedDate: null,
   upperRotation: "A",
   completedExerciseIdsByDate: {},
+  completedBonusIdsByDate: {},
   dailyWorkoutSnapshotByDate: {},
 };
 
@@ -435,6 +445,117 @@ const getStepXp = (workout: WorkoutType): number => {
   }
 };
 
+const getBonusWorkoutsForMainWorkout = (
+  workout: WorkoutType,
+  level: number
+): BonusWorkout[] => {
+  const tier = getDifficultyTier(level);
+
+  const common: BonusWorkout[] = [
+    {
+      id: "bonus_walk",
+      title: "Walk",
+      description: "10 minute easy walk",
+      xp: 3,
+    },
+    {
+      id: "bonus_stretch",
+      title: "Stretch",
+      description: "5 minute full body stretch",
+      xp: 3,
+    },
+    {
+      id: "bonus_mobility",
+      title: "Mobility Reset",
+      description: "6 minute mobility flow",
+      xp: 3,
+    },
+  ];
+
+  if (workout === "Football" || workout === "Tennis") {
+    return [
+      {
+        id: "bonus_cooldown",
+        title: "Cooldown",
+        description: "5 minute cooldown walk and breathing",
+        xp: 3,
+      },
+      {
+        id: "bonus_hips",
+        title: "Hip Mobility",
+        description: "5 minute hips and ankles reset",
+        xp: 3,
+      },
+      {
+        id: "bonus_core_light",
+        title: "Light Core",
+        description: `Plank hold ${tier >= 3 ? "45" : "30"} seconds`,
+        xp: 3,
+      },
+    ];
+  }
+
+  if (workout === "Office Pull Gym") {
+    return [
+      {
+        id: "bonus_carry",
+        title: "Grip Finisher",
+        description: "2 extra carry or hold rounds",
+        xp: 4,
+      },
+      {
+        id: "bonus_stretch_lats",
+        title: "Lat Stretch",
+        description: "Upper back and lat stretch",
+        xp: 3,
+      },
+      {
+        id: "bonus_walk_home",
+        title: "Extra Walk",
+        description: "10 minute easy walk",
+        xp: 3,
+      },
+    ];
+  }
+
+  if (workout === "Rest") {
+    return [
+      {
+        id: "bonus_fresh_air",
+        title: "Fresh Air",
+        description: "10 minute relaxed walk",
+        xp: 3,
+      },
+      {
+        id: "bonus_gentle_stretch",
+        title: "Gentle Stretch",
+        description: "5 minute recovery stretch",
+        xp: 3,
+      },
+    ];
+  }
+
+  return [
+    {
+      id: "bonus_core_finisher",
+      title: "Core Finisher",
+      description: `Plank and sit ups mini finisher`,
+      xp: 4,
+    },
+    ...common,
+  ];
+};
+
+const getBonusXpEarnedToday = (
+  completedBonusIds: string[],
+  availableBonuses: BonusWorkout[]
+) => {
+  return completedBonusIds.reduce((total, id) => {
+    const found = availableBonuses.find((bonus) => bonus.id === id);
+    return total + (found?.xp || 0);
+  }, 0);
+};
+
 const getDayTypeColorClass = (dayType: DayType) => {
   switch (dayType) {
     case "WFH":
@@ -583,9 +704,29 @@ function App() {
 
   const todaysCompletedExerciseIds =
     state.completedExerciseIdsByDate[todayDate] || [];
+  const todaysCompletedBonusIds = state.completedBonusIdsByDate[todayDate] || [];
+
   const completedCount = todaysCompletedExerciseIds.length;
   const totalCount = todaysExercises.length;
   const allDone = totalCount > 0 && completedCount === totalCount;
+
+  const availableBonusWorkouts = useMemo(() => {
+    return getBonusWorkoutsForMainWorkout(todaysWorkout, state.level);
+  }, [todaysWorkout, state.level]);
+
+  const bonusXpEarnedToday = useMemo(() => {
+    return getBonusXpEarnedToday(
+      todaysCompletedBonusIds,
+      availableBonusWorkouts
+    );
+  }, [todaysCompletedBonusIds, availableBonusWorkouts]);
+
+  const bonusXpRemainingToday = Math.max(
+    0,
+    BONUS_XP_CAP_PER_DAY - bonusXpEarnedToday
+  );
+
+  const dailyMainXpEarned = completedCount * getStepXp(todaysWorkout);
 
   useEffect(() => {
     const savedState = localStorage.getItem("fitness-today-state");
@@ -605,6 +746,7 @@ function App() {
         ...parsed,
         completedExerciseIdsByDate:
           parsed.completedExerciseIdsByDate || parsed.completedStepsByDate || {},
+        completedBonusIdsByDate: parsed.completedBonusIdsByDate || {},
         dailyWorkoutSnapshotByDate: parsed.dailyWorkoutSnapshotByDate || {},
       });
     }
@@ -694,6 +836,11 @@ function App() {
       return;
     }
 
+    if (allDone) {
+      setMessage("Main workout already complete. Bonus training is below.");
+      return;
+    }
+
     if (todaysCompletedExerciseIds.includes(exerciseId)) {
       setMessage("That mission is already done.");
       return;
@@ -771,7 +918,7 @@ function App() {
     if (isFinishingDay && leveledUp && tierWentUp) {
       triggerRewardFeedback(
         xpGain,
-        `Level up. You reached level ${newLevel}. Tomorrow’s workout gets harder.`
+        `Daily workout complete. You reached level ${newLevel}. Tomorrow gets harder.`
       );
       return;
     }
@@ -779,7 +926,7 @@ function App() {
     if (isFinishingDay && leveledUp) {
       triggerRewardFeedback(
         xpGain,
-        `Level up. You reached level ${newLevel} and finished today’s session.`
+        `Daily workout complete. Level ${newLevel} reached. Come back tomorrow for your next main session.`
       );
       return;
     }
@@ -787,7 +934,7 @@ function App() {
     if (isFinishingDay) {
       triggerRewardFeedback(
         xpGain,
-        "Session complete. Nice work. Come back tomorrow."
+        "Daily workout complete. Nice work. Bonus training is now available."
       );
       return;
     }
@@ -795,7 +942,7 @@ function App() {
     if (leveledUp && tierWentUp) {
       triggerRewardFeedback(
         xpGain,
-        `Level up. You reached level ${newLevel}. New difficulty unlocked for tomorrow.`
+        `Level up. You reached level ${newLevel}. New difficulty unlocks tomorrow.`
       );
       return;
     }
@@ -813,6 +960,66 @@ function App() {
     );
   };
 
+  const handleCompleteBonusWorkout = (bonus: BonusWorkout) => {
+    if (!allDone) {
+      setMessage("Finish today’s main workout first.");
+      return;
+    }
+
+    if (todaysCompletedBonusIds.includes(bonus.id)) {
+      setMessage("That bonus workout is already done.");
+      return;
+    }
+
+    if (bonusXpRemainingToday <= 0) {
+      setMessage("You hit today’s bonus XP cap. Main workout is still what counts most.");
+      return;
+    }
+
+    const xpGain = Math.min(bonus.xp, bonusXpRemainingToday);
+
+    if (xpGain <= 0) {
+      setMessage("No bonus XP remaining today.");
+      return;
+    }
+
+    setState((prev) => {
+      const currentBonuses = prev.completedBonusIdsByDate[todayDate] || [];
+      const newXp = prev.xp + xpGain;
+      const newLevel = Math.floor(newXp / XP_PER_LEVEL) + 1;
+
+      return {
+        ...prev,
+        xp: newXp,
+        level: newLevel,
+        completedBonusIdsByDate: {
+          ...prev.completedBonusIdsByDate,
+          [todayDate]: [...currentBonuses, bonus.id],
+        },
+      };
+    });
+
+    const newXpTotal = state.xp + xpGain;
+    const newLevel = Math.floor(newXpTotal / XP_PER_LEVEL) + 1;
+    const leveledUp = newLevel > state.level;
+
+    if (leveledUp) {
+      triggerRewardFeedback(
+        xpGain,
+        `Bonus training done. Level ${newLevel} reached.`
+      );
+      return;
+    }
+
+    triggerRewardFeedback(
+      xpGain,
+      `Bonus training complete. ${Math.max(
+        0,
+        bonusXpRemainingToday - xpGain
+      )} bonus XP left today.`
+    );
+  };
+
   const handleReset = () => {
     localStorage.removeItem("fitness-today-state");
     localStorage.removeItem("fitness-today-plan");
@@ -823,8 +1030,7 @@ function App() {
     setMascotMood("idle");
     setFloatingXp(null);
   };
-
-  return (
+    return (
     <div className="scene">
       <div className="cloud cloud-1" />
       <div className="cloud cloud-2" />
@@ -928,6 +1134,25 @@ function App() {
                       : " · will lock on first mission"}
                   </p>
                 </div>
+
+                {allDone && (
+                  <div className="xp-card" style={{ marginTop: 12 }}>
+                    <div className="xp-top">
+                      <span>Main XP earned today</span>
+                      <span>{dailyMainXpEarned} XP</span>
+                    </div>
+                    <div className="xp-top">
+                      <span>Bonus XP earned today</span>
+                      <span>
+                        {bonusXpEarnedToday} / {BONUS_XP_CAP_PER_DAY}
+                      </span>
+                    </div>
+                    <p className="muted-text">
+                      Your main daily workout is complete. Bonus training gives
+                      reduced XP and does not affect your streak.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -942,7 +1167,7 @@ function App() {
                 }}
               >
                 <SectionIcon src={mascotSrc} />
-                <h3>Today’s Missions</h3>
+                <h3>{allDone ? "Daily Workout Complete" : "Today’s Missions"}</h3>
               </div>
               {allDone && <span className="done-pill">Done</span>}
             </div>
@@ -956,6 +1181,111 @@ function App() {
                 <p className="message">
                   Full rest day. Recover properly and come back tomorrow.
                 </p>
+              </div>
+            ) : allDone ? (
+              <div className="task-stack">
+                <div className="rest-state-card">
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      marginBottom: 12,
+                    }}
+                  >
+                    <Mascot mood="happy" size={60} src={mascotSrc} />
+                    <div>
+                      <h4
+                        style={{
+                          margin: 0,
+                          fontSize: 20,
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        You finished today’s main session
+                      </h4>
+                      <p className="muted-text" style={{ marginTop: 6 }}>
+                        {completedCount}/{totalCount} missions done · +
+                        {dailyMainXpEarned} XP earned today
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="message" style={{ marginBottom: 8 }}>
+                    Great work. Your streak has been updated and tomorrow’s main
+                    session will appear fresh.
+                  </p>
+
+                  <p className="muted-text" style={{ margin: 0 }}>
+                    You can still do optional bonus training below for reduced
+                    XP.
+                  </p>
+                </div>
+
+                <div className="section-heading" style={{ marginTop: 8 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <SectionIcon src={mascotSrc} />
+                    <h3>Bonus Training</h3>
+                  </div>
+                  <span className="type-pill type-free">
+                    {bonusXpEarnedToday}/{BONUS_XP_CAP_PER_DAY} XP
+                  </span>
+                </div>
+
+                <p className="muted-text" style={{ marginTop: -4 }}>
+                  Extra movement for a little more XP. This does not replace
+                  tomorrow’s workout.
+                </p>
+
+                {availableBonusWorkouts.map((bonus) => {
+                  const done = todaysCompletedBonusIds.includes(bonus.id);
+                  const wouldBeCapped = !done && bonusXpRemainingToday <= 0;
+
+                  return (
+                    <button
+                      key={bonus.id}
+                      className={`task-card ${done ? "task-card-done" : ""}`}
+                      onClick={() => handleCompleteBonusWorkout(bonus)}
+                      disabled={done || wouldBeCapped}
+                    >
+                      <div className="task-card-left">
+                        <span
+                          className={`task-check ${done ? "task-check-done" : ""}`}
+                        >
+                          {done ? "✓" : ""}
+                        </span>
+                        <span className="task-text">
+                          <strong style={{ display: "block", marginBottom: 2 }}>
+                            {bonus.title}
+                          </strong>
+                          <span className="muted-text">{bonus.description}</span>
+                        </span>
+                      </div>
+
+                      <span className="task-xp">
+                        +{Math.min(bonus.xp, bonusXpRemainingToday)} XP
+                      </span>
+                    </button>
+                  );
+                })}
+
+                {bonusXpRemainingToday <= 0 && (
+                  <div className="rest-state-card">
+                    <p className="message" style={{ marginBottom: 6 }}>
+                      Bonus XP cap reached for today.
+                    </p>
+                    <p className="muted-text" style={{ margin: 0 }}>
+                      Nice. You can still rest now and come back tomorrow for
+                      full-value missions.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="task-stack">
@@ -1010,7 +1340,10 @@ function App() {
           </div>
 
           <div className="template-row">
-            <button className="soft-button" onClick={() => applyTemplate("normal")}>
+            <button
+              className="soft-button"
+              onClick={() => applyTemplate("normal")}
+            >
               Normal
             </button>
             <button
@@ -1058,7 +1391,10 @@ function App() {
                   <SectionIcon size={20} src={mascotSrc} />
                   <h4>Edit {selectedDay}</h4>
                 </div>
-                <button className="close-button" onClick={() => setSelectedDay(null)}>
+                <button
+                  className="close-button"
+                  onClick={() => setSelectedDay(null)}
+                >
                   Close
                 </button>
               </div>
