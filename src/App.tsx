@@ -31,6 +31,22 @@ type WorkoutType =
 
 type WeeklyPlan = Record<DayKey, DayType>;
 
+type ExerciseDef = {
+  id: string;
+  name: string;
+  reps?: number;
+  seconds?: number;
+  sets: number;
+};
+
+type DailyWorkoutSnapshot = {
+  workout: WorkoutType;
+  displayName: string;
+  level: number;
+  tier: number;
+  exercises: ExerciseDef[];
+};
+
 type AppState = {
   xp: number;
   level: number;
@@ -38,10 +54,22 @@ type AppState = {
   totalSessions: number;
   lastCompletedDate: string | null;
   upperRotation: "A" | "B";
-  completedStepsByDate: Record<string, string[]>;
+  completedExerciseIdsByDate: Record<string, string[]>;
+  dailyWorkoutSnapshotByDate: Record<string, DailyWorkoutSnapshot>;
 };
 
 const XP_PER_LEVEL = 100;
+
+const MASCOT_FILES = ["icon.png", "wave.png", "nerd.png", "cool.png"];
+
+const getMascotForDate = (dateString: string) => {
+  const hash = dateString
+    .split("")
+    .reduce((acc, char) => acc + char.charCodeAt(0), 0);
+
+  const file = MASCOT_FILES[hash % MASCOT_FILES.length];
+  return `${import.meta.env.BASE_URL}${file}`;
+};
 
 const dayNames: DayKey[] = [
   "Sunday",
@@ -90,7 +118,8 @@ const defaultState: AppState = {
   totalSessions: 0,
   lastCompletedDate: null,
   upperRotation: "A",
-  completedStepsByDate: {},
+  completedExerciseIdsByDate: {},
+  dailyWorkoutSnapshotByDate: {},
 };
 
 const getTodayString = () => {
@@ -169,65 +198,219 @@ const getWorkoutDisplayName = (workout: WorkoutType): string => {
   }
 };
 
-const getWorkoutDetails = (workout: WorkoutType): string[] => {
+const getBaseWorkoutExercises = (workout: WorkoutType): ExerciseDef[] => {
   switch (workout) {
     case "Home Upper A":
       return [
-        "12 push ups",
-        "10 incline push ups",
-        "8 pike push ups",
-        "12 chair dips",
-        "15 sit ups",
-        "30 second plank",
+        { id: "pushups", name: "Push ups", reps: 12, sets: 1 },
+        { id: "incline_pushups", name: "Incline push ups", reps: 10, sets: 1 },
+        { id: "pike_pushups", name: "Pike push ups", reps: 8, sets: 1 },
+        { id: "chair_dips", name: "Chair dips", reps: 12, sets: 1 },
+        { id: "situps", name: "Sit ups", reps: 15, sets: 1 },
+        { id: "plank", name: "Plank", seconds: 30, sets: 1 },
       ];
+
     case "Home Upper B":
       return [
-        "10 close grip push ups",
-        "8 slow push ups",
-        "10 chair dips",
-        "12 leg raises",
-        "20 shoulder taps each side",
-        "35 second plank",
+        {
+          id: "close_grip_pushups",
+          name: "Close grip push ups",
+          reps: 10,
+          sets: 1,
+        },
+        { id: "slow_pushups", name: "Slow push ups", reps: 8, sets: 1 },
+        { id: "chair_dips_b", name: "Chair dips", reps: 10, sets: 1 },
+        { id: "leg_raises", name: "Leg raises", reps: 12, sets: 1 },
+        {
+          id: "shoulder_taps",
+          name: "Shoulder taps each side",
+          reps: 20,
+          sets: 1,
+        },
+        { id: "plank_b", name: "Plank", seconds: 35, sets: 1 },
       ];
+
     case "Office Pull Gym":
       return [
-        "Lat pulldown 3 x 10",
-        "Seated row 3 x 10",
-        "Dumbbell row 3 x 10 each side",
-        "Bicep curls 3 x 12",
-        "Rear delt fly 3 x 12",
+        { id: "lat_pulldown", name: "Lat pulldown", reps: 10, sets: 3 },
+        { id: "seated_row", name: "Seated row", reps: 10, sets: 3 },
+        {
+          id: "dumbbell_row",
+          name: "Dumbbell row each side",
+          reps: 10,
+          sets: 3,
+        },
+        { id: "bicep_curls", name: "Bicep curls", reps: 12, sets: 3 },
+        { id: "rear_delt_fly", name: "Rear delt fly", reps: 12, sets: 3 },
       ];
+
     case "Football":
       return [
-        "Play football",
-        "Count this as your full session",
-        "Focus on intensity and movement",
+        { id: "football_session", name: "Play football", reps: 1, sets: 1 },
+        {
+          id: "football_focus",
+          name: "Focus on intensity and movement",
+          reps: 1,
+          sets: 1,
+        },
       ];
+
     case "Tennis":
       return [
-        "Play tennis",
-        "Count this as your full session",
-        "Focus on movement and consistency",
+        { id: "tennis_session", name: "Play tennis", reps: 1, sets: 1 },
+        {
+          id: "tennis_focus",
+          name: "Focus on movement and consistency",
+          reps: 1,
+          sets: 1,
+        },
       ];
+
     case "Free Day Core":
       return [
-        "20 sit ups",
-        "12 leg raises",
-        "30 second plank",
-        "20 second side plank each side",
-        "5 minutes mobility",
+        { id: "situps_core", name: "Sit ups", reps: 20, sets: 1 },
+        { id: "leg_raises_core", name: "Leg raises", reps: 12, sets: 1 },
+        { id: "plank_core", name: "Plank", seconds: 30, sets: 1 },
+        {
+          id: "side_plank",
+          name: "Side plank each side",
+          seconds: 20,
+          sets: 1,
+        },
+        { id: "mobility", name: "Mobility", seconds: 300, sets: 1 },
       ];
+
     case "Recovery":
       return [
-        "10 minute walk",
-        "5 minute stretch",
-        "Light mobility only",
+        { id: "walk", name: "Walk", seconds: 600, sets: 1 },
+        { id: "stretch", name: "Stretch", seconds: 300, sets: 1 },
+        {
+          id: "light_mobility",
+          name: "Light mobility",
+          seconds: 300,
+          sets: 1,
+        },
       ];
+
     case "Rest":
-      return ["Full rest day", "Recover properly", "No mission today"];
+      return [];
+
     default:
       return [];
   }
+};
+
+const getDifficultyTier = (level: number) => {
+  if (level >= 13) return 5;
+  if (level >= 10) return 4;
+  if (level >= 7) return 3;
+  if (level >= 4) return 2;
+  return 1;
+};
+
+const scaleExerciseForLevel = (
+  exercise: ExerciseDef,
+  level: number,
+  workout: WorkoutType
+): ExerciseDef => {
+  if (
+    workout === "Office Pull Gym" ||
+    workout === "Football" ||
+    workout === "Tennis" ||
+    workout === "Recovery" ||
+    workout === "Rest"
+  ) {
+    return exercise;
+  }
+
+  const tier = getDifficultyTier(level);
+
+  if (tier === 1) {
+    return exercise;
+  }
+
+  if (tier === 2) {
+    return {
+      ...exercise,
+      reps: exercise.reps !== undefined ? exercise.reps + 2 : undefined,
+      seconds:
+        exercise.seconds !== undefined ? exercise.seconds + 5 : undefined,
+    };
+  }
+
+  if (tier === 3) {
+    return {
+      ...exercise,
+      reps:
+        exercise.reps !== undefined
+          ? Math.max(6, Math.floor(exercise.reps * 0.7))
+          : undefined,
+      seconds:
+        exercise.seconds !== undefined
+          ? Math.max(20, Math.floor(exercise.seconds * 0.7))
+          : undefined,
+      sets: 2,
+    };
+  }
+
+  if (tier === 4) {
+    return {
+      ...exercise,
+      reps:
+        exercise.reps !== undefined
+          ? Math.max(7, Math.floor(exercise.reps * 0.85))
+          : undefined,
+      seconds:
+        exercise.seconds !== undefined
+          ? Math.max(25, Math.floor(exercise.seconds * 0.85))
+          : undefined,
+      sets: 2,
+    };
+  }
+
+  return {
+    ...exercise,
+    reps: exercise.reps,
+    seconds: exercise.seconds,
+    sets: 2,
+  };
+};
+
+const getScaledWorkoutExercises = (
+  workout: WorkoutType,
+  level: number
+): ExerciseDef[] => {
+  const baseExercises = getBaseWorkoutExercises(workout);
+  return baseExercises.map((exercise) =>
+    scaleExerciseForLevel(exercise, level, workout)
+  );
+};
+
+const formatExerciseLabel = (exercise: ExerciseDef): string => {
+  if (
+    exercise.id === "football_session" ||
+    exercise.id === "football_focus" ||
+    exercise.id === "tennis_session" ||
+    exercise.id === "tennis_focus"
+  ) {
+    return exercise.name;
+  }
+
+  if (
+    exercise.id === "mobility" ||
+    exercise.id === "walk" ||
+    exercise.id === "stretch" ||
+    exercise.id === "light_mobility"
+  ) {
+    const minutes = Math.floor((exercise.seconds || 0) / 60);
+    return `${minutes} minute ${exercise.name.toLowerCase()} x${exercise.sets}`;
+  }
+
+  if (exercise.seconds !== undefined) {
+    return `${exercise.seconds} second ${exercise.name.toLowerCase()} x${exercise.sets}`;
+  }
+
+  return `${exercise.reps} ${exercise.name.toLowerCase()} x${exercise.sets}`;
 };
 
 const getStepXp = (workout: WorkoutType): number => {
@@ -274,70 +457,47 @@ const getDayTypeColorClass = (dayType: DayType) => {
 };
 
 type MascotProps = {
-  mood: "idle" | "happy";
+  mood?: "idle" | "happy";
+  size?: number;
+  src: string;
 };
 
-function Mascot({ mood }: MascotProps) {
+function Mascot({ mood = "idle", size = 96, src }: MascotProps) {
   return (
     <div
       className={`mascot-wrap ${mood === "happy" ? "mascot-happy" : ""}`}
       aria-hidden="true"
+      style={{ width: size, height: size }}
     >
-      <svg
-        className="mascot-svg"
-        viewBox="0 0 180 180"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <ellipse cx="92" cy="160" rx="42" ry="10" className="mascot-shadow" />
-
-        <g className="mascot-body-group">
-          <circle cx="90" cy="86" r="42" className="mascot-body" />
-          <ellipse cx="90" cy="98" rx="28" ry="22" className="mascot-belly" />
-
-          <g className="mascot-arm mascot-arm-left">
-            <ellipse cx="49" cy="87" rx="13" ry="24" className="mascot-limb" />
-          </g>
-
-          <g className="mascot-arm mascot-arm-right">
-            <ellipse cx="131" cy="87" rx="13" ry="24" className="mascot-limb" />
-          </g>
-
-          <g className="mascot-leg mascot-leg-left">
-            <ellipse cx="72" cy="138" rx="12" ry="22" className="mascot-limb" />
-          </g>
-
-          <g className="mascot-leg mascot-leg-right">
-            <ellipse cx="108" cy="138" rx="12" ry="22" className="mascot-limb" />
-          </g>
-
-          <circle cx="75" cy="78" r="5.5" className="mascot-eye" />
-          <circle cx="105" cy="78" r="5.5" className="mascot-eye" />
-          <circle cx="77" cy="76" r="1.6" className="mascot-eye-shine" />
-          <circle cx="107" cy="76" r="1.6" className="mascot-eye-shine" />
-
-          <path
-            d={
-              mood === "happy"
-                ? "M 76 94 Q 90 110 104 94"
-                : "M 79 96 Q 90 105 101 96"
-            }
-            fill="none"
-            strokeWidth="4"
-            strokeLinecap="round"
-            className="mascot-mouth"
-          />
-
-          <ellipse cx="90" cy="60" rx="20" ry="9" className="mascot-headband" />
-          <path
-            d="M 109 58 C 120 54, 128 60, 132 70"
-            fill="none"
-            strokeWidth="7"
-            strokeLinecap="round"
-            className="mascot-headband-tail"
-          />
-        </g>
-      </svg>
+      <img
+        src={src}
+        alt=""
+        className="mascot-img"
+        style={{
+          width: "100%",
+          height: "100%",
+          objectFit: "contain",
+          display: "block",
+        }}
+      />
     </div>
+  );
+}
+
+function SectionIcon({ size = 24, src }: { size?: number; src: string }) {
+  return (
+    <img
+      src={src}
+      alt=""
+      aria-hidden="true"
+      style={{
+        width: size,
+        height: size,
+        objectFit: "contain",
+        display: "block",
+        flexShrink: 0,
+      }}
+    />
   );
 }
 
@@ -400,22 +560,31 @@ function App() {
   const todayFriendlyDate = getTodayFriendlyDate();
   const todayDay = getTodayDayName();
   const todayDayType = plan[todayDay];
+  const mascotSrc = getMascotForDate(todayDate);
 
-  const todaysWorkout = useMemo(() => {
+  const liveWorkout = useMemo(() => {
     return getWorkoutForDayType(todayDayType, state.upperRotation);
   }, [todayDayType, state.upperRotation]);
 
-  const todaysWorkoutDisplay = useMemo(() => {
-    return getWorkoutDisplayName(todaysWorkout);
-  }, [todaysWorkout]);
+  const liveWorkoutDisplay = useMemo(() => {
+    return getWorkoutDisplayName(liveWorkout);
+  }, [liveWorkout]);
 
-  const todaysSteps = useMemo(() => {
-    return getWorkoutDetails(todaysWorkout);
-  }, [todaysWorkout]);
+  const liveExercises = useMemo(() => {
+    return getScaledWorkoutExercises(liveWorkout, state.level);
+  }, [liveWorkout, state.level]);
 
-  const todaysCompletedSteps = state.completedStepsByDate[todayDate] || [];
-  const completedCount = todaysCompletedSteps.length;
-  const totalCount = todaysWorkout === "Rest" ? 0 : todaysSteps.length;
+  const todaysSnapshot = state.dailyWorkoutSnapshotByDate[todayDate];
+
+  const todaysWorkout = todaysSnapshot?.workout ?? liveWorkout;
+  const todaysWorkoutDisplay = todaysSnapshot?.displayName ?? liveWorkoutDisplay;
+  const todaysExercises = todaysSnapshot?.exercises ?? liveExercises;
+  const currentTier = todaysSnapshot?.tier ?? getDifficultyTier(state.level);
+
+  const todaysCompletedExerciseIds =
+    state.completedExerciseIdsByDate[todayDate] || [];
+  const completedCount = todaysCompletedExerciseIds.length;
+  const totalCount = todaysExercises.length;
   const allDone = totalCount > 0 && completedCount === totalCount;
 
   useEffect(() => {
@@ -427,12 +596,16 @@ function App() {
     }
 
     if (savedState) {
-      const parsed = JSON.parse(savedState) as Partial<AppState>;
+      const parsed = JSON.parse(savedState) as Partial<AppState> & {
+        completedStepsByDate?: Record<string, string[]>;
+      };
 
       setState({
         ...defaultState,
         ...parsed,
-        completedStepsByDate: parsed.completedStepsByDate || {},
+        completedExerciseIdsByDate:
+          parsed.completedExerciseIdsByDate || parsed.completedStepsByDate || {},
+        dailyWorkoutSnapshotByDate: parsed.dailyWorkoutSnapshotByDate || {},
       });
     }
   }, []);
@@ -515,25 +688,34 @@ function App() {
     setMessage("Recovery week template applied.");
   };
 
-  const handleCompleteStep = (step: string) => {
+  const handleCompleteExercise = (exerciseId: string) => {
     if (todaysWorkout === "Rest") {
       setMessage("Today is a rest day.");
       return;
     }
 
-    if (todaysCompletedSteps.includes(step)) {
-      setMessage("That step is already done.");
+    if (todaysCompletedExerciseIds.includes(exerciseId)) {
+      setMessage("That mission is already done.");
       return;
     }
 
     const xpGain = getStepXp(todaysWorkout);
     const yesterday = getYesterdayString();
-    const isFirstStepToday = todaysCompletedSteps.length === 0;
-    const isFinishingDay = todaysCompletedSteps.length + 1 === todaysSteps.length;
+    const isFirstExerciseToday = todaysCompletedExerciseIds.length === 0;
+    const isFinishingDay =
+      todaysCompletedExerciseIds.length + 1 === todaysExercises.length;
+
+    const snapshotToLock: DailyWorkoutSnapshot = todaysSnapshot || {
+      workout: liveWorkout,
+      displayName: liveWorkoutDisplay,
+      level: state.level,
+      tier: getDifficultyTier(state.level),
+      exercises: liveExercises,
+    };
 
     setState((prev) => {
-      const currentDone = prev.completedStepsByDate[todayDate] || [];
-      const newCompletedForToday = [...currentDone, step];
+      const currentDone = prev.completedExerciseIdsByDate[todayDate] || [];
+      const newCompletedForToday = [...currentDone, exerciseId];
       const newXp = prev.xp + xpGain;
       const newLevel = Math.floor(newXp / XP_PER_LEVEL) + 1;
 
@@ -541,7 +723,7 @@ function App() {
       let newTotalSessions = prev.totalSessions;
       let newLastCompletedDate = prev.lastCompletedDate;
 
-      if (isFirstStepToday) {
+      if (isFirstExerciseToday) {
         if (prev.lastCompletedDate === yesterday) {
           newStreak = prev.streak + 1;
         } else if (prev.lastCompletedDate !== todayDate) {
@@ -554,7 +736,8 @@ function App() {
 
       const shouldRotate =
         isFinishingDay &&
-        (todaysWorkout === "Home Upper A" || todaysWorkout === "Home Upper B");
+        (snapshotToLock.workout === "Home Upper A" ||
+          snapshotToLock.workout === "Home Upper B");
 
       return {
         ...prev,
@@ -564,13 +747,17 @@ function App() {
         totalSessions: newTotalSessions,
         lastCompletedDate: newLastCompletedDate,
         upperRotation: shouldRotate
-          ? todaysWorkout === "Home Upper A"
+          ? snapshotToLock.workout === "Home Upper A"
             ? "B"
             : "A"
           : prev.upperRotation,
-        completedStepsByDate: {
-          ...prev.completedStepsByDate,
+        completedExerciseIdsByDate: {
+          ...prev.completedExerciseIdsByDate,
           [todayDate]: newCompletedForToday,
+        },
+        dailyWorkoutSnapshotByDate: {
+          ...prev.dailyWorkoutSnapshotByDate,
+          [todayDate]: snapshotToLock,
         },
       };
     });
@@ -578,6 +765,16 @@ function App() {
     const newXpTotal = state.xp + xpGain;
     const newLevel = Math.floor(newXpTotal / XP_PER_LEVEL) + 1;
     const leveledUp = newLevel > state.level;
+    const newTier = getDifficultyTier(newLevel);
+    const tierWentUp = newTier > snapshotToLock.tier;
+
+    if (isFinishingDay && leveledUp && tierWentUp) {
+      triggerRewardFeedback(
+        xpGain,
+        `Level up. You reached level ${newLevel}. Tomorrow’s workout gets harder.`
+      );
+      return;
+    }
 
     if (isFinishingDay && leveledUp) {
       triggerRewardFeedback(
@@ -595,6 +792,14 @@ function App() {
       return;
     }
 
+    if (leveledUp && tierWentUp) {
+      triggerRewardFeedback(
+        xpGain,
+        `Level up. You reached level ${newLevel}. New difficulty unlocked for tomorrow.`
+      );
+      return;
+    }
+
     if (leveledUp) {
       triggerRewardFeedback(xpGain, `Level up. You reached level ${newLevel}.`);
       return;
@@ -602,7 +807,9 @@ function App() {
 
     triggerRewardFeedback(
       xpGain,
-      `Step done. ${todaysSteps.length - (todaysCompletedSteps.length + 1)} to go.`
+      `Mission done. ${
+        todaysExercises.length - (todaysCompletedExerciseIds.length + 1)
+      } to go.`
     );
   };
 
@@ -631,7 +838,7 @@ function App() {
         <section className="top-hero hero-compact">
           <div className="mascot-header">
             <div className="mascot-zone">
-              <Mascot mood={mascotMood} />
+              <Mascot mood={mascotMood} size={96} src={mascotSrc} />
               {floatingXp !== null && (
                 <div className="floating-xp">+{floatingXp} XP</div>
               )}
@@ -655,11 +862,23 @@ function App() {
         <section className="daily-grid">
           <div className="panel progress-panel">
             <div className="section-heading">
-              <h3>Today’s Progress</h3>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <SectionIcon src={mascotSrc} />
+                <h3>Today’s Progress</h3>
+              </div>
             </div>
 
             <div className="progress-panel-inner">
-              <ProgressRing completed={completedCount} total={Math.max(totalCount, 1)} />
+              <ProgressRing
+                completed={completedCount}
+                total={Math.max(totalCount, 1)}
+              />
 
               <div className="daily-progress-copy">
                 <div className="stats-row compact-stats">
@@ -692,42 +911,78 @@ function App() {
                   </div>
                   <p className="muted-text">{xpNeeded} XP to next level</p>
                 </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    marginTop: 2,
+                  }}
+                >
+                  <SectionIcon size={20} src={mascotSrc} />
+                  <p className="muted-text">
+                    Difficulty tier: {currentTier}
+                    {todaysSnapshot
+                      ? " · locked for today"
+                      : " · will lock on first mission"}
+                  </p>
+                </div>
               </div>
             </div>
           </div>
 
           <div className="panel missions-panel">
             <div className="section-heading">
-              <h3>Today’s Missions</h3>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <SectionIcon src={mascotSrc} />
+                <h3>Today’s Missions</h3>
+              </div>
               {allDone && <span className="done-pill">Done</span>}
             </div>
 
             {todaysWorkout === "Rest" ? (
-              <div className="rest-state-card">
+              <div
+                className="rest-state-card"
+                style={{ display: "flex", alignItems: "center", gap: 14 }}
+              >
+                <Mascot size={56} src={mascotSrc} />
                 <p className="message">
                   Full rest day. Recover properly and come back tomorrow.
                 </p>
               </div>
             ) : (
               <div className="task-stack">
-                {todaysSteps.map((step) => {
-                  const done = todaysCompletedSteps.includes(step);
+                {todaysExercises.map((exercise) => {
+                  const done = todaysCompletedExerciseIds.includes(exercise.id);
 
                   return (
                     <button
-                      key={step}
+                      key={exercise.id}
                       className={`task-card ${done ? "task-card-done" : ""}`}
-                      onClick={() => handleCompleteStep(step)}
+                      onClick={() => handleCompleteExercise(exercise.id)}
                       disabled={done}
                     >
                       <div className="task-card-left">
-                        <span className={`task-check ${done ? "task-check-done" : ""}`}>
+                        <span
+                          className={`task-check ${done ? "task-check-done" : ""}`}
+                        >
                           {done ? "✓" : ""}
                         </span>
-                        <span className="task-text">{step}</span>
+                        <span className="task-text">
+                          {formatExerciseLabel(exercise)}
+                        </span>
                       </div>
 
-                      <span className="task-xp">+{getStepXp(todaysWorkout)} XP</span>
+                      <span className="task-xp">
+                        +{getStepXp(todaysWorkout)} XP
+                      </span>
                     </button>
                   );
                 })}
@@ -739,7 +994,17 @@ function App() {
         <section className="panel week-panel wide-week-panel">
           <div className="section-heading">
             <div>
-              <h3>Weekly Planner</h3>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 4,
+                }}
+              >
+                <SectionIcon src={mascotSrc} />
+                <h3>Weekly Planner</h3>
+              </div>
               <p className="muted-text small-gap">Tap a day to edit it.</p>
             </div>
           </div>
@@ -773,7 +1038,9 @@ function App() {
               >
                 <span className="day-short">{shortDayNames[day]}</span>
                 <span className="day-full">{day}</span>
-                <span className={getDayTypeColorClass(plan[day])}>{plan[day]}</span>
+                <span className={getDayTypeColorClass(plan[day])}>
+                  {plan[day]}
+                </span>
               </button>
             ))}
           </div>
@@ -781,7 +1048,16 @@ function App() {
           {selectedDay && (
             <div className="editor-card">
               <div className="editor-top">
-                <h4>Edit {selectedDay}</h4>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <SectionIcon size={20} src={mascotSrc} />
+                  <h4>Edit {selectedDay}</h4>
+                </div>
                 <button className="close-button" onClick={() => setSelectedDay(null)}>
                   Close
                 </button>
